@@ -77,3 +77,12 @@ POST /api/auth/login
 - JWT authentication — tokens expire after 24 hours
 - BCrypt password hashing
 - Stateless — no sessions
+
+
+## 📚 Documentation
+
+Full implementation notes including architecture decisions, 
+concept explanations and complete flows:
+[View Documentation](https://docs.google.com/document/d/1jS0ol4TuV5lZnwfOzOngq3a2R8FxzJ3m/edit?usp=sharing&ouid=110393881445813149836&rtpof=true&sd=true
+)
+
