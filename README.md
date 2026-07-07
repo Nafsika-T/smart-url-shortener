@@ -158,11 +158,19 @@ DELETE /api/urls/{id}
 X-User-Id: {userId}
 ```
 
-## ⚡ Key Features
-- **Redis cache-aside pattern** — short codes cached for 24h for instant redirects
-- **Kafka async messaging** — click events published without slowing down redirects
-- **Ownership validation** — users can only modify their own URLs
-- **`@Transactional`** — atomic operations for data consistency
+## 🔧 Known Improvements
+
+These are intentional architectural improvements identified during development, planned for a future iteration:
+
+**1. Add `timestamp` to `ErrorResponse` in `auth-service`**
+The `shortener-service` includes a `timestamp` field in error responses for easier debugging. The `auth-service` should be updated for consistency.
+
+**2. Store active flag in Redis cache**
+Currently on a Redis cache hit, the `redirect()` method doesn't verify if the URL is still active. The fix is to store the `active` flag alongside the URL in Redis so it can be checked without an extra PostgreSQL query.
+
+**3. Remove synchronous click counter update — rely purely on Kafka**
+Currently `publishClickEvent()` updates `clickCount` synchronously on every redirect, partially defeating the purpose of Redis caching. The proper solution is to let `analytics-service` handle all counting asynchronously via Kafka, so the redirect path never touches PostgreSQL directly.
+
 
 ## 📚 Documentation
 
