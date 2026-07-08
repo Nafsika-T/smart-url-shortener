@@ -14,4 +14,6 @@ public class ClickEvent {
     private String shortCode;
     private Long userId;
     private LocalDateTime clickAt;
+    private String ipAddress;
+    private String userAgent;
 }

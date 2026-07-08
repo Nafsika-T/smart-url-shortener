@@ -46,11 +46,11 @@ public class UrlService {
     }
 
     @Transactional
-    public String redirect(String shortCode) {
+    public String redirect(String shortCode, String ipAddress, String userAgent) {
         String cachedUrl = (String) redisTemplate.opsForValue().get(shortCode);
 
         if (cachedUrl != null) {
-            publishClickEvent(shortCode);
+            publishClickEvent(shortCode, ipAddress, userAgent);
             return cachedUrl;
         }
 
@@ -63,7 +63,7 @@ public class UrlService {
 
         redisTemplate.opsForValue().set(shortCode, shortUrl.getOriginalUrl(), REDIS_TTL_HOURS, TimeUnit.HOURS);
 
-        publishClickEvent(shortCode);
+        publishClickEvent(shortCode, ipAddress, userAgent);
 
         return shortUrl.getOriginalUrl();
     }
@@ -103,14 +103,16 @@ public class UrlService {
         return toResponse(shortUrlRepository.save(shortUrl));
     }
 
-    private void publishClickEvent(String shortCode) {
+    private void publishClickEvent(String shortCode, String ipAddress, String userAgent) {
         shortUrlRepository.findByShortCode(shortCode).ifPresent(shortUrl -> {
             shortUrl.setClickCount(shortUrl.getClickCount() + 1);
             shortUrlRepository.save(shortUrl);
             clickEventProducer.sendClickEvent(new ClickEvent(
                     shortCode,
                     shortUrl.getUserId(),
-                    LocalDateTime.now()
+                    LocalDateTime.now(),
+                    ipAddress,
+                    userAgent
             ));
         });
     }
