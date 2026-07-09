@@ -1,5 +1,6 @@
 package com.urlshortener.shortener_service.service;
 
+import com.urlshortener.shortener_service.dto.CachedUrlData;
 import com.urlshortener.shortener_service.dto.CreateUrlRequest;
 import com.urlshortener.shortener_service.dto.UrlResponse;
 import com.urlshortener.shortener_service.exception.ResourceNotFoundException;
@@ -40,18 +41,21 @@ public class UrlService {
 
         ShortUrl saved = shortUrlRepository.save(shortUrl);
 
-        redisTemplate.opsForValue().set(shortCode, request.getOriginalUrl(), REDIS_TTL_HOURS, TimeUnit.HOURS);
+        CachedUrlData toCache = new CachedUrlData(saved.getOriginalUrl(), saved.getUserId(), saved.isActive());
+
+        redisTemplate.opsForValue().set(shortCode, toCache, REDIS_TTL_HOURS, TimeUnit.HOURS);
 
         return toResponse(saved);
     }
 
     @Transactional
     public String redirect(String shortCode, String ipAddress, String userAgent) {
-        String cachedUrl = (String) redisTemplate.opsForValue().get(shortCode);
 
-        if (cachedUrl != null) {
-            publishClickEvent(shortCode, ipAddress, userAgent);
-            return cachedUrl;
+        CachedUrlData cached = (CachedUrlData) redisTemplate.opsForValue().get(shortCode);
+
+        if (cached != null) {
+            publishClickEvent(shortCode, cached.getUserId(), ipAddress, userAgent);
+            return cached.getOriginalUrl();
         }
 
         ShortUrl shortUrl = shortUrlRepository.findByShortCode(shortCode)
@@ -61,9 +65,11 @@ public class UrlService {
             throw new ResourceNotFoundException("Short URL is deactivated: " + shortCode);
         }
 
-        redisTemplate.opsForValue().set(shortCode, shortUrl.getOriginalUrl(), REDIS_TTL_HOURS, TimeUnit.HOURS);
+        CachedUrlData toCache = new CachedUrlData(shortUrl.getOriginalUrl(), shortUrl.getUserId(), shortUrl.isActive());
 
-        publishClickEvent(shortCode, ipAddress, userAgent);
+        redisTemplate.opsForValue().set(shortCode, toCache, REDIS_TTL_HOURS, TimeUnit.HOURS);
+
+        publishClickEvent(shortCode, toCache.getUserId(), ipAddress, userAgent);
 
         return shortUrl.getOriginalUrl();
     }
@@ -103,18 +109,15 @@ public class UrlService {
         return toResponse(shortUrlRepository.save(shortUrl));
     }
 
-    private void publishClickEvent(String shortCode, String ipAddress, String userAgent) {
-        shortUrlRepository.findByShortCode(shortCode).ifPresent(shortUrl -> {
-            shortUrl.setClickCount(shortUrl.getClickCount() + 1);
-            shortUrlRepository.save(shortUrl);
-            clickEventProducer.sendClickEvent(new ClickEvent(
-                    shortCode,
-                    shortUrl.getUserId(),
-                    LocalDateTime.now(),
-                    ipAddress,
-                    userAgent
-            ));
-        });
+    private void publishClickEvent(String shortCode, Long userId, String ipAddress, String userAgent) {
+
+        clickEventProducer.sendClickEvent(new ClickEvent(
+                shortCode,
+                userId,
+                LocalDateTime.now(),
+                ipAddress,
+                userAgent
+        ));
     }
 
     private UrlResponse toResponse(ShortUrl shortUrl) {
