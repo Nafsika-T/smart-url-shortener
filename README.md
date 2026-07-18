@@ -1,20 +1,21 @@
 # 🔗 Smart URL Shortener Platform
 
-A URL shortening platform built with Spring Boot microservices, designed to demonstrate real-world concepts like Redis caching, Kafka messaging, and JWT authentication.
+A URL shortening platform built with Spring Boot microservices, designed to demonstrate real-world backend concepts: Redis caching, Kafka event-driven analytics, JWT authentication, and clean service separation.
 
-Users can register, log in, and create short URLs. Every click is tracked with analytics, and each user has a credits system managed with database transactions.
+Users register, log in, and create short URLs. Every click is tracked asynchronously and enriched with geolocation and device data, giving URL owners real statistics without slowing down redirects.
 
 ## 🛠️ Tech Stack
 
 | Technology | Purpose |
 |---|---|
-| Spring Boot 3.5.15 | Core framework |
+| Spring Boot 3.5.x | Core framework |
 | Spring Security + JWT | Authentication & authorization |
 | Spring Data JPA + Hibernate | Database access |
-| PostgreSQL | Primary database |
+| PostgreSQL | Primary database (one per service) |
 | Redis | Caching for fast URL redirects |
 | Apache Kafka | Async event streaming for analytics |
-| Spring Cloud Gateway | API Gateway & routing |
+| MaxMind GeoLite2 | IP geolocation for click analytics |
+| UserAgentUtils | Browser/device detection for click analytics |
 | Docker + Docker Compose | Containerization |
 | Java 21 | Programming language |
 
@@ -22,10 +23,12 @@ Users can register, log in, and create short URLs. Every click is tracked with a
 
 | Service | Port | Status | Description |
 |---|---|---|---|
-| `auth-service` | 8081 | ✅ Complete | User registration, login, JWT authentication |
-| `shortener-service` | 8082 | ✅ Complete | URL creation, Redis caching, Kafka events |
-| `analytics-service` | 8083 | ⬜ Coming Soon | Click tracking and statistics via Kafka |
-| `api-gateway` | 8080 | ⬜ Coming Soon | Single entry point for all requests |
+| [`auth-service`](./auth-service) | 8081 | ✅ Complete | User registration, login, JWT authentication |
+| [`shortener-service`](./shortener-service) | 8082 | ✅ Complete | URL creation, Redis caching, Kafka event publishing |
+| [`analytics-service`](./analytics-service) | 8083 | ✅ Complete | Kafka consumer — click enrichment & statistics |
+| `api-gateway` | 8080 | ⬜ Planned | Single entry point, JWT validation, request routing |
+
+**Also planned:** full Docker Compose (all services + databases), Kubernetes deployment, CI/CD pipeline.
 
 ## 🏗️ Architecture
 
@@ -33,151 +36,205 @@ Users can register, log in, and create short URLs. Every click is tracked with a
 Client
    │
    ▼
-api-gateway:8080        (coming soon)
+api-gateway:8080                    (planned)
    │
    ├──▶ auth-service:8081
    │         └── PostgreSQL (auth_db)
    │
    ├──▶ shortener-service:8082
    │         ├── PostgreSQL (shortener_db)
-   │         ├── Redis (cache)
-   │         └── Kafka (publishes click events)
-   │
-   └──▶ analytics-service:8083  (coming soon)
-             ├── PostgreSQL (analytics_db)
-             └── Kafka (consumes click events)
+   │         ├── Redis (cache-aside, stores owner + active flag)
+   │         └── Kafka producer ── publishes ClickEvent ──┐
+   │                                                        │
+   └──▶ analytics-service:8083                              │
+             ├── Kafka consumer ◀────────────────────────────┘
+             ├── GeoLite2 (IP → country)
+             ├── UserAgentUtils (User-Agent → device/browser)
+             └── PostgreSQL (analytics_db)
 ```
 
-## 🚀 Running auth-service
+`shortener-service` and `analytics-service` are fully decoupled — connected only through Kafka. A redirect never waits on analytics processing, and `analytics-service` can be scaled or restarted independently.
 
-**1. Create the database:**
+## 📁 Repository Structure
+
+This is a single repository containing all services as independent Spring Boot projects:
+
+```
+smart-url-shortener/
+├── auth-service/
+├── shortener-service/
+├── analytics-service/
+└── README.md
+```
+
+Each service has its own `pom.xml`, is independently runnable, and owns its own database — no shared code or shared data between services.
+
+## 🚀 Getting Started
+
+### Prerequisites
+- Java 21
+- Maven
+- PostgreSQL (running locally)
+- Docker Desktop (for Redis & Kafka)
+
+### 1. Start shared infrastructure (Redis, Zookeeper, Kafka)
+```bash
+cd shortener-service
+docker-compose up -d
+```
+
+### 2. Create the databases
 ```bash
 psql -U postgres
 CREATE DATABASE auth_db;
+CREATE DATABASE shortener_db;
+CREATE DATABASE analytics_db;
 ```
 
-**2. Run the service:**
+### 3. Run each service
+From each service's folder:
 ```bash
 ./mvnw spring-boot:run
 ```
 
-Service runs on `http://localhost:8081`
+| Service | URL |
+|---|---|
+| auth-service | http://localhost:8081 |
+| shortener-service | http://localhost:8082 |
+| analytics-service | http://localhost:8083 |
 
-## 📡 auth-service API Endpoints
+### ⚠️ Extra setup required for `analytics-service`
 
-### Register
+The GeoLite2 database file (`GeoLite2-City.mmdb`) is **not included in this repository**, per MaxMind's license terms. To run `analytics-service` locally:
+
+1. Create a free account at [maxmind.com/en/geolite2/signup](https://www.maxmind.com/en/geolite2/signup)
+2. Generate a license key and download **GeoLite2-City** (binary `.mmdb` format)
+3. Place the file at:
+   ```
+   analytics-service/src/main/resources/geoip/GeoLite2-City.mmdb
+   ```
+
+Without this file, `analytics-service` will fail to start.
+
+## 📡 API Reference
+
+### auth-service
+
+**Register**
 ```
 POST /api/auth/register
 ```
 ```json
-{
-    "username": "john",
-    "email": "john@email.com",
-    "password": "password123"
-}
+{ "username": "john", "email": "john@email.com", "password": "password123" }
 ```
 
-### Login
+**Login**
 ```
 POST /api/auth/login
 ```
 ```json
-{
-    "email": "john@email.com",
-    "password": "password123"
-}
+{ "email": "john@email.com", "password": "password123" }
 ```
-
-### Response
 ```json
-{
-    "token": "eyJhbGciOiJIUzI1NiJ9...",
-    "username": "john"
-}
+{ "token": "eyJhbGciOiJIUzI1NiJ9...", "username": "john" }
 ```
 
-## 🔐 Security
-- JWT authentication — tokens expire after 24 hours
-- BCrypt password hashing
-- Stateless — no sessions
+**Security:** JWT authentication (24h expiry), BCrypt password hashing, stateless — no sessions.
 
-## 🚀 Running shortener-service
+---
 
-**1. Create the database:**
-```bash
-psql -U postgres
-CREATE DATABASE shortener_db;
-```
+### shortener-service
 
-**2. Start Redis and Kafka with Docker:**
-```bash
-docker-compose up -d
-```
-
-**3. Run the service:**
-```bash
-./mvnw spring-boot:run
-```
-
-Service runs on `http://localhost:8082`
-
-## 📡 shortener-service API Endpoints
-
-### Create Short URL
+**Create Short URL**
 ```
 POST /api/urls
 X-User-Id: {userId}
 ```
 ```json
-{
-    "originalUrl": "https://www.example.com/very/long/url"
-}
+{ "originalUrl": "https://www.example.com/very/long/url" }
 ```
 
-### Redirect
+**Redirect**
 ```
 GET /{shortCode}
 ```
-Redirects to the original URL (302 Found)
+302 redirect to the original URL. Public endpoint, no auth required.
 
-### Get All User URLs
+**Get All User URLs**
 ```
 GET /api/urls
 X-User-Id: {userId}
 ```
 
-### Deactivate URL
+**Deactivate URL**
 ```
 PATCH /api/urls/{id}/deactivate
 X-User-Id: {userId}
 ```
 
-### Delete URL
+**Delete URL**
 ```
 DELETE /api/urls/{id}
 X-User-Id: {userId}
 ```
 
-## 🔧 Known Improvements
+---
 
-These are intentional architectural improvements identified during development, planned for a future iteration:
+### analytics-service
 
-**1. Add `timestamp` to `ErrorResponse` in `auth-service`**
-The `shortener-service` includes a `timestamp` field in error responses for easier debugging. The `auth-service` should be updated for consistency.
+**Total clicks**
+```
+GET /api/analytics/{shortCode}/total
+```
 
-**2. Store active flag in Redis cache**
-Currently on a Redis cache hit, the `redirect()` method doesn't verify if the URL is still active. The fix is to store the `active` flag alongside the URL in Redis so it can be checked without an extra PostgreSQL query.
+**Clicks by country**
+```
+GET /api/analytics/{shortCode}/by-country
+```
+```json
+[ { "country": "Greece", "total": 8 }, { "country": "Germany", "total": 3 } ]
+```
 
-**3. Remove synchronous click counter update — rely purely on Kafka**
-Currently `publishClickEvent()` updates `clickCount` synchronously on every redirect, partially defeating the purpose of Redis caching. The proper solution is to let `analytics-service` handle all counting asynchronously via Kafka, so the redirect path never touches PostgreSQL directly.
+**Clicks by device/browser**
+```
+GET /api/analytics/{shortCode}/by-device
+```
+```json
+[ { "deviceType": "Computer", "browser": "Chrome 15", "total": 5 } ]
+```
 
+**Click history**
+```
+GET /api/analytics/{shortCode}/history
+```
+
+## 🔧 Known Limitations & Planned Improvements
+
+Tracked intentionally, rather than fixed reactively — these reflect deliberate sequencing decisions during development, not oversights.
+
+| # | Item | Status |
+|---|---|---|
+| 1 | Add `timestamp` to `ErrorResponse` in `auth-service` (already present in the other two services) | ⬜ Open |
+| 2 | Align Spring Boot patch version across all three services | ⬜ Open |
+| 3 | Restrict Kafka `spring.json.trusted.packages` from `*` to explicit package names (production hardening) | ⬜ Open |
+| 4 | Add ownership (`userId`) checks to `analytics-service`'s stats endpoints | ⬜ Open |
+| 5 | Replace raw entity response in `/history` with a proper response DTO | ⬜ Open |
+
+**Resolved during development, kept here for context:**
+- ~~Store active flag in Redis cache~~ — investigated, found unnecessary: `deactivateUrl()` already evicts the Redis entry on every deactivation, so a deactivated URL can never remain cached.
+- Removed synchronous `clickCount` updates from `shortener-service` — click counting is now handled entirely and asynchronously by `analytics-service` via Kafka, keeping Redis cache hits fully database-free.
+
+## 🗺️ Roadmap
+
+- [x] `auth-service`
+- [x] `shortener-service`
+- [x] `analytics-service`
+- [ ] `api-gateway`
+- [ ] Full Docker Compose (all services + databases)
+- [ ] Kubernetes deployment
+- [ ] CI/CD pipeline
 
 ## 📚 Documentation
 
-Full implementation notes including architecture decisions,
-concept explanations and complete flows:
-[View Documentation](https://docs.google.com/document/d/1jS0ol4TuV5lZnwfOzOngq3a2R8FxzJ3m/edit?usp=sharing&ouid=110393881445813149836&rtpof=true&sd=true)
-
-[View Documentation](https://docs.google.com/document/d/1jS0ol4TuV5lZnwfOzOngq3a2R8FxzJ3m/edit?usp=sharing&ouid=110393881445813149836&rtpof=true&sd=true
-)
-
+Full implementation notes — architecture decisions, concept explanations, and complete request/response flows for every service:
+pending
