@@ -219,6 +219,7 @@ Tracked intentionally, rather than fixed reactively — these reflect deliberate
 | 3 | Restrict Kafka `spring.json.trusted.packages` from `*` to explicit package names (production hardening) | ⬜ Open |
 | 4 | Add ownership (`userId`) checks to `analytics-service`'s stats endpoints | ⬜ Open |
 | 5 | Replace raw entity response in `/history` with a proper response DTO | ⬜ Open |
+| 6 | Embed userId as a claim in the JWT at login/register time | ⬜ Open | 
 
 **Resolved during development, kept here for context:**
 - ~~Store active flag in Redis cache~~ — investigated, found unnecessary: `deactivateUrl()` already evicts the Redis entry on every deactivation, so a deactivated URL can never remain cached.
