@@ -22,9 +22,10 @@ public class JwtUtils {
         return getClaims(token).getSubject();
     }
 
-    public String generateToken(String email) {
+    public String generateToken(String email, Long id) {
         return Jwts.builder()
                 .subject(email)
+                .claim("userId", id)
                 .issuedAt(new Date())
                 .expiration(new Date(System.currentTimeMillis()+jwtExpiration))
                 .signWith(getSigningKey())
