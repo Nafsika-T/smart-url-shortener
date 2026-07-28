@@ -2,13 +2,14 @@
 
 A URL shortening platform built with Spring Boot microservices, designed to demonstrate real-world backend concepts: Redis caching, Kafka event-driven analytics, JWT authentication, and clean service separation.
 
-Users register, log in, and create short URLs. Every click is tracked asynchronously and enriched with geolocation and device data, giving URL owners real statistics without slowing down redirects.
+Users register, log in, and create short URLs. Every click is tracked asynchronously and enriched with geolocation and device data, giving URL owners real statistics without slowing down redirects. A dedicated API gateway sits in front of all three backend services, validating JWTs and routing requests so clients only ever need to talk to one address.
 
 ## 🛠️ Tech Stack
 
 | Technology | Purpose |
 |---|---|
 | Spring Boot 3.5.x | Core framework |
+| Spring Cloud Gateway (WebFlux) | Single entry point, JWT validation, request routing |
 | Spring Security + JWT | Authentication & authorization |
 | Spring Data JPA + Hibernate | Database access |
 | PostgreSQL | Primary database (one per service) |
@@ -23,10 +24,10 @@ Users register, log in, and create short URLs. Every click is tracked asynchrono
 
 | Service | Port | Status | Description |
 |---|---|---|---|
+| [`api-gateway`](./api-gateway) | 8080 | ✅ Complete | Single entry point, JWT validation, request routing |
 | [`auth-service`](./auth-service) | 8081 | ✅ Complete | User registration, login, JWT authentication |
 | [`shortener-service`](./shortener-service) | 8082 | ✅ Complete | URL creation, Redis caching, Kafka event publishing |
 | [`analytics-service`](./analytics-service) | 8083 | ✅ Complete | Kafka consumer — click enrichment & statistics |
-| `api-gateway` | 8080 | ⬜ Planned | Single entry point, JWT validation, request routing |
 
 **Also planned:** full Docker Compose (all services + databases), Kubernetes deployment, CI/CD pipeline.
 
@@ -36,17 +37,17 @@ Users register, log in, and create short URLs. Every click is tracked asynchrono
 Client
    │
    ▼
-api-gateway:8080                    (planned)
+api-gateway:8080  ── validates JWT, forwards X-User-Id / X-User-Email
    │
-   ├──▶ auth-service:8081
+   ├──▶ auth-service:8081                    (public)
    │         └── PostgreSQL (auth_db)
    │
-   ├──▶ shortener-service:8082
+   ├──▶ shortener-service:8082               (protected, except redirect)
    │         ├── PostgreSQL (shortener_db)
    │         ├── Redis (cache-aside, stores owner + active flag)
    │         └── Kafka producer ── publishes ClickEvent ──┐
    │                                                        │
-   └──▶ analytics-service:8083                              │
+   └──▶ analytics-service:8083                              │  (protected)
              ├── Kafka consumer ◀────────────────────────────┘
              ├── GeoLite2 (IP → country)
              ├── UserAgentUtils (User-Agent → device/browser)
@@ -55,12 +56,15 @@ api-gateway:8080                    (planned)
 
 `shortener-service` and `analytics-service` are fully decoupled — connected only through Kafka. A redirect never waits on analytics processing, and `analytics-service` can be scaled or restarted independently.
 
+`api-gateway` is the only service clients should call directly. It validates the JWT on protected routes and attaches `X-User-Email`/`X-User-Id` headers before forwarding — downstream services no longer need callers to set those headers by hand. `analytics-service` additionally verifies that the caller actually owns the requested `shortCode`, independent of the gateway.
+
 ## 📁 Repository Structure
 
 This is a single repository containing all services as independent Spring Boot projects:
 
 ```
 smart-url-shortener/
+├── api-gateway/
 ├── auth-service/
 ├── shortener-service/
 ├── analytics-service/
@@ -97,11 +101,16 @@ From each service's folder:
 ./mvnw spring-boot:run
 ```
 
+Start `auth-service`, `shortener-service`, and `analytics-service` first, then `api-gateway` — the gateway itself will start regardless of order, but requests through it won't succeed until the backend it's routing to is actually up.
+
 | Service | URL |
 |---|---|
+| api-gateway | http://localhost:8080 |
 | auth-service | http://localhost:8081 |
 | shortener-service | http://localhost:8082 |
 | analytics-service | http://localhost:8083 |
+
+> `api-gateway` and `auth-service` must share the same `jwt.secret` — both default to the same fallback value if the `JWT_SECRET` environment variable isn't set, but if you override one in a real environment, override the other identically or token validation will fail.
 
 ### ⚠️ Extra setup required for `analytics-service`
 
@@ -118,7 +127,9 @@ Without this file, `analytics-service` will fail to start.
 
 ## 📡 API Reference
 
-### auth-service
+All requests below go through `api-gateway` on port `8080`. The gateway validates the `Authorization` header and attaches `X-User-Id`/`X-User-Email` to protected requests automatically — callers no longer set those headers themselves. (Each service's own port is still reachable directly for local debugging, but `shortener-service` has no authentication of its own, so direct access should only be used for testing.)
+
+### auth-service — public, no token required
 
 **Register**
 ```
@@ -143,53 +154,55 @@ POST /api/auth/login
 
 ---
 
-### shortener-service
+### shortener-service — protected except redirect
 
 **Create Short URL**
 ```
 POST /api/urls
-X-User-Id: {userId}
+Authorization: Bearer {token}
 ```
 ```json
 { "originalUrl": "https://www.example.com/very/long/url" }
 ```
 
-**Redirect**
+**Redirect** — public, no auth required
 ```
 GET /{shortCode}
 ```
-302 redirect to the original URL. Public endpoint, no auth required.
+302 redirect to the original URL.
 
 **Get All User URLs**
 ```
 GET /api/urls
-X-User-Id: {userId}
+Authorization: Bearer {token}
 ```
 
 **Deactivate URL**
 ```
 PATCH /api/urls/{id}/deactivate
-X-User-Id: {userId}
+Authorization: Bearer {token}
 ```
 
 **Delete URL**
 ```
 DELETE /api/urls/{id}
-X-User-Id: {userId}
+Authorization: Bearer {token}
 ```
 
 ---
 
-### analytics-service
+### analytics-service — protected, ownership-checked
 
 **Total clicks**
 ```
 GET /api/analytics/{shortCode}/total
+Authorization: Bearer {token}
 ```
 
 **Clicks by country**
 ```
 GET /api/analytics/{shortCode}/by-country
+Authorization: Bearer {token}
 ```
 ```json
 [ { "country": "Greece", "total": 8 }, { "country": "Germany", "total": 3 } ]
@@ -198,6 +211,7 @@ GET /api/analytics/{shortCode}/by-country
 **Clicks by device/browser**
 ```
 GET /api/analytics/{shortCode}/by-device
+Authorization: Bearer {token}
 ```
 ```json
 [ { "deviceType": "Computer", "browser": "Chrome 15", "total": 5 } ]
@@ -206,7 +220,10 @@ GET /api/analytics/{shortCode}/by-device
 **Click history**
 ```
 GET /api/analytics/{shortCode}/history
+Authorization: Bearer {token}
 ```
+
+A caller only sees stats for shortCodes they own. If a shortCode has no click data yet, any authenticated caller can see the (empty/zero) result, since there's nothing yet to check ownership against.
 
 ## 🔧 Known Limitations & Planned Improvements
 
@@ -214,23 +231,19 @@ Tracked intentionally, rather than fixed reactively — these reflect deliberate
 
 | # | Item | Status |
 |---|---|---|
-| 1 | Add `timestamp` to `ErrorResponse` in `auth-service` (already present in the other two services) | ⬜ Open |
-| 2 | Align Spring Boot patch version across all three services | ⬜ Open |
+| 1 | Add `timestamp` to `ErrorResponse` in `auth-service` (already present in the other services) | ⬜ Open |
+| 2 | Align Spring Boot patch version across all services | ⬜ Open |
 | 3 | Restrict Kafka `spring.json.trusted.packages` from `*` to explicit package names (production hardening) | ⬜ Open |
-| 4 | Add ownership (`userId`) checks to `analytics-service`'s stats endpoints | ⬜ Open |
-| 5 | Replace raw entity response in `/history` with a proper response DTO | ⬜ Open |
-| 6 | Embed userId as a claim in the JWT at login/register time | ⬜ Open | 
-
-**Resolved during development, kept here for context:**
-- ~~Store active flag in Redis cache~~ — investigated, found unnecessary: `deactivateUrl()` already evicts the Redis entry on every deactivation, so a deactivated URL can never remain cached.
-- Removed synchronous `clickCount` updates from `shortener-service` — click counting is now handled entirely and asynchronously by `analytics-service` via Kafka, keeping Redis cache hits fully database-free.
+| 4 | Replace raw entity response in `/history` with a proper response DTO | ⬜ Open |
+| 5 | Fix root `.gitignore` encoding — `.idea/` is meant to be excluded but currently isn't, due to the file being saved in the wrong text encoding | ⬜ Open |
+| 6 | `api-gateway`'s error response `timestamp` serializes as a number array instead of an ISO date string, inconsistent with the other services | ⬜ Open |
 
 ## 🗺️ Roadmap
 
 - [x] `auth-service`
 - [x] `shortener-service`
 - [x] `analytics-service`
-- [ ] `api-gateway`
+- [x] `api-gateway`
 - [ ] Full Docker Compose (all services + databases)
 - [ ] Kubernetes deployment
 - [ ] CI/CD pipeline
