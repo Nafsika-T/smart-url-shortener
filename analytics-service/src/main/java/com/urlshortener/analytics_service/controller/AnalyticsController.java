@@ -5,10 +5,7 @@ import com.urlshortener.analytics_service.dto.DeviceClickCount;
 import com.urlshortener.analytics_service.model.ClickEventEntity;
 import com.urlshortener.analytics_service.service.AnalyticsService;
 import lombok.RequiredArgsConstructor;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 
@@ -20,22 +17,22 @@ public class AnalyticsController {
     private final AnalyticsService analyticsService;
 
     @GetMapping("/{shortCode}/total")
-    public long getTotalClicks(@PathVariable String shortCode) {
-        return analyticsService.getTotalClicks(shortCode);
+    public long getTotalClicks(@PathVariable String shortCode, @RequestHeader("X-User-Id") Long userId) {
+        return analyticsService.getTotalClicks(shortCode, userId);
     }
 
     @GetMapping("/{shortCode}/by-country")
-    public List<CountryClickCount> getClicksByCountry(@PathVariable String shortCode) {
-        return analyticsService.getClicksByCountry(shortCode);
+    public List<CountryClickCount> getClicksByCountry(@PathVariable String shortCode, @RequestHeader("X-User-Id") Long userId) {
+        return analyticsService.getClicksByCountry(shortCode, userId);
     }
 
     @GetMapping("/{shortCode}/by-device")
-    public List<DeviceClickCount> getClicksByDevice(@PathVariable String shortCode) {
-        return analyticsService.getClicksByDevice(shortCode);
+    public List<DeviceClickCount> getClicksByDevice(@PathVariable String shortCode, @RequestHeader("X-User-Id") Long userId) {
+        return analyticsService.getClicksByDevice(shortCode, userId);
     }
 
     @GetMapping("/{shortCode}/history")
-    public List<ClickEventEntity> getClickHistory(@PathVariable String shortCode) {
-        return analyticsService.getClickHistory(shortCode);
+    public List<ClickEventEntity> getClickHistory(@PathVariable String shortCode, @RequestHeader("X-User-Id") Long userId) {
+        return analyticsService.getClickHistory(shortCode, userId);
     }
 }

@@ -8,6 +8,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.util.List;
+import java.util.Optional;
 
 public interface ClickEventRepository extends JpaRepository<ClickEventEntity, Long> {
 
@@ -26,4 +27,6 @@ public interface ClickEventRepository extends JpaRepository<ClickEventEntity, Lo
             "WHERE c.shortCode = :shortCode " +
             "GROUP BY c.deviceType, c.browser")
     List<DeviceClickCount> countClicksByDevice(@Param("shortCode") String shortCode);
+
+    Optional<ClickEventEntity> findFirstByShortCode(String shortCode);
 }
