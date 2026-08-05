@@ -29,7 +29,7 @@ Users register, log in, and create short URLs. Every click is tracked asynchrono
 | [`shortener-service`](./shortener-service) | 8082 | ✅ Complete | URL creation, Redis caching, Kafka event publishing |
 | [`analytics-service`](./analytics-service) | 8083 | ✅ Complete | Kafka consumer — click enrichment & statistics |
 
-**Also planned:** full Docker Compose (all services + databases), Kubernetes deployment, CI/CD pipeline.
+**Also planned:** Kubernetes deployment, CI/CD pipeline.
 
 ## 🏗️ Architecture
 
@@ -64,10 +64,12 @@ This is a single repository containing all services as independent Spring Boot p
 
 ```
 smart-url-shortener/
-├── api-gateway/
-├── auth-service/
-├── shortener-service/
-├── analytics-service/
+├── api-gateway/          (includes Dockerfile)
+├── auth-service/         (includes Dockerfile)
+├── shortener-service/    (includes Dockerfile)
+├── analytics-service/    (includes Dockerfile)
+├── postgres-init/        (DB creation script for Docker Compose)
+├── docker-compose.yml    (full stack: infra + all 4 services)
 └── README.md
 ```
 
@@ -75,46 +77,9 @@ Each service has its own `pom.xml`, is independently runnable, and owns its own 
 
 ## 🚀 Getting Started
 
-### Prerequisites
-- Java 21
-- Maven
-- PostgreSQL (running locally)
-- Docker Desktop (for Redis & Kafka)
+### ⚠️ Required first, for either option below: `analytics-service`'s GeoLite2 file
 
-### 1. Start shared infrastructure (Redis, Zookeeper, Kafka)
-```bash
-cd shortener-service
-docker-compose up -d
-```
-
-### 2. Create the databases
-```bash
-psql -U postgres
-CREATE DATABASE auth_db;
-CREATE DATABASE shortener_db;
-CREATE DATABASE analytics_db;
-```
-
-### 3. Run each service
-From each service's folder:
-```bash
-./mvnw spring-boot:run
-```
-
-Start `auth-service`, `shortener-service`, and `analytics-service` first, then `api-gateway` — the gateway itself will start regardless of order, but requests through it won't succeed until the backend it's routing to is actually up.
-
-| Service | URL |
-|---|---|
-| api-gateway | http://localhost:8080 |
-| auth-service | http://localhost:8081 |
-| shortener-service | http://localhost:8082 |
-| analytics-service | http://localhost:8083 |
-
-> `api-gateway` and `auth-service` must share the same `jwt.secret` — both default to the same fallback value if the `JWT_SECRET` environment variable isn't set, but if you override one in a real environment, override the other identically or token validation will fail.
-
-### ⚠️ Extra setup required for `analytics-service`
-
-The GeoLite2 database file (`GeoLite2-City.mmdb`) is **not included in this repository**, per MaxMind's license terms. To run `analytics-service` locally:
+The GeoLite2 database file (`GeoLite2-City.mmdb`) is **not included in this repository**, per MaxMind's license terms. Without it, `analytics-service` fails to start — whether run locally or built into a container, since it's read from the compiled classpath either way.
 
 1. Create a free account at [maxmind.com/en/geolite2/signup](https://www.maxmind.com/en/geolite2/signup)
 2. Generate a license key and download **GeoLite2-City** (binary `.mmdb` format)
@@ -123,7 +88,58 @@ The GeoLite2 database file (`GeoLite2-City.mmdb`) is **not included in this repo
    analytics-service/src/main/resources/geoip/GeoLite2-City.mmdb
    ```
 
-Without this file, `analytics-service` will fail to start.
+### Option A — Docker Compose (recommended)
+
+Runs the entire stack — Postgres, Redis, Kafka/Zookeeper, and all four services — with one command. Requires only Docker Desktop.
+
+```bash
+docker-compose up --build
+```
+
+This builds each service's image from its `Dockerfile`, creates the three databases automatically (via `postgres-init/init-databases.sql`), and starts everything on a shared Docker network — services reach each other by container name (e.g. `api-gateway` calls `http://auth-service:8081` internally), while the same ports are still published to your machine:
+
+| Service | URL |
+|---|---|
+| api-gateway | http://localhost:8080 |
+| auth-service | http://localhost:8081 |
+| shortener-service | http://localhost:8082 |
+| analytics-service | http://localhost:8083 |
+
+`JWT_SECRET` is set explicitly (and identically) for both `auth-service` and `api-gateway` in `docker-compose.yml`, so token validation works out of the box. `api-gateway` loads its routes from `application-docker.properties` (activated via `SPRING_PROFILES_ACTIVE=docker`) instead of the default `application.properties`, so its routes point at Docker service names (e.g. `http://auth-service:8081`) rather than `localhost`. To stop everything: `docker-compose down` (add `-v` to also wipe the Postgres volume).
+
+> **Port 5432 conflict:** if you have Postgres installed natively on your machine (outside Docker) and its service is running, it will likely already be holding port 5432, causing tools like pgAdmin to connect to that instead of the containerized database (though your services themselves are unaffected, since they talk to Postgres over Docker's internal network, not this port). If you hit this, stop the native Postgres service (Windows: `services.msc` → find `postgresql-x64-...` → Stop, and set Startup type to Disabled to prevent it recurring).
+
+### Option B — Run locally (Java/Maven, no containers for the apps)
+
+Useful for active development, debugging, or IDE breakpoints.
+
+**Prerequisites:** Java 21, Maven, PostgreSQL (running locally), Docker Desktop (for Redis & Kafka only).
+
+**1. Start shared infrastructure (Redis, Zookeeper, Kafka)**
+```bash
+cd shortener-service
+docker-compose up -d
+```
+
+**2. Create the databases**
+```bash
+psql -U postgres
+CREATE DATABASE auth_db;
+CREATE DATABASE shortener_db;
+CREATE DATABASE analytics_db;
+```
+
+**3. Run each service**
+From each service's folder:
+```bash
+./mvnw spring-boot:run
+```
+
+Start `auth-service`, `shortener-service`, and `analytics-service` first, then `api-gateway` — the gateway itself will start regardless of order, but requests through it won't succeed until the backend it's routing to is actually up.
+
+Same URLs as the table above.
+
+> `api-gateway` and `auth-service` must share the same `jwt.secret` — both default to the same fallback value if the `JWT_SECRET` environment variable isn't set, but if you override one in a real environment, override the other identically or token validation will fail.
 
 ## 📡 API Reference
 
@@ -244,7 +260,8 @@ Tracked intentionally, rather than fixed reactively — these reflect deliberate
 - [x] `shortener-service`
 - [x] `analytics-service`
 - [x] `api-gateway`
-- [ ] Full Docker Compose (all services + databases)
+- [x] Full Docker Compose (all services + databases)
+- [ ] Frontend
 - [ ] Kubernetes deployment
 - [ ] CI/CD pipeline
 
