@@ -1,5 +1,6 @@
 package com.urlshortener.analytics_service.service;
 
+import com.urlshortener.analytics_service.dto.ClickHistoryEntry;
 import com.urlshortener.analytics_service.dto.CountryClickCount;
 import com.urlshortener.analytics_service.dto.DeviceClickCount;
 import com.urlshortener.analytics_service.dto.DeviceInfo;
@@ -52,9 +53,12 @@ public class AnalyticsService {
         return clickEventRepository.countClicksByDevice(shortCode);
     }
 
-    public List<ClickEventEntity> getClickHistory(String shortCode, Long userId) {
+    public List<ClickHistoryEntry> getClickHistory(String shortCode, Long userId) {
         verifyOwnership(shortCode, userId);
-        return clickEventRepository.findByShortCode(shortCode);
+        return clickEventRepository.findByShortCode(shortCode)
+                .stream()
+                .map(e -> new ClickHistoryEntry(e.getShortCode(), e.getClickedAt(), e.getCountry(), e.getDeviceType(), e.getBrowser()))
+                .toList();
     }
 
     private void verifyOwnership(String shortCode, Long userId) {

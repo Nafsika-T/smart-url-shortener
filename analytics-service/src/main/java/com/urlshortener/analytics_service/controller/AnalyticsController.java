@@ -1,8 +1,8 @@
 package com.urlshortener.analytics_service.controller;
 
+import com.urlshortener.analytics_service.dto.ClickHistoryEntry;
 import com.urlshortener.analytics_service.dto.CountryClickCount;
 import com.urlshortener.analytics_service.dto.DeviceClickCount;
-import com.urlshortener.analytics_service.model.ClickEventEntity;
 import com.urlshortener.analytics_service.service.AnalyticsService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
@@ -32,7 +32,7 @@ public class AnalyticsController {
     }
 
     @GetMapping("/{shortCode}/history")
-    public List<ClickEventEntity> getClickHistory(@PathVariable String shortCode, @RequestHeader("X-User-Id") Long userId) {
+    public List<ClickHistoryEntry> getClickHistory(@PathVariable String shortCode, @RequestHeader("X-User-Id") Long userId) {
         return analyticsService.getClickHistory(shortCode, userId);
     }
 }
