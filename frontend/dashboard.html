@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>URL Shortener</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <form id="short-url-form" class="form-box">
+        <input type="text" id="original-url" placeholder="Enter a URL to shorten">
+        <button type="submit">Shorten</button>
+    </form>
+
+    <div class="dashboard-layout">
+        <section>
+            <h2>Your URLs</h2>
+            <div id="url-list"></div>
+        </section>
+
+        <div class="right-column">
+            <section>
+                <h2>Analytics</h2>
+                <div id="analytics-summary" class="panel"></div>
+            </section>
+
+            <section>
+                <h2>History</h2>
+                <div id="analytics-history" class="panel"></div>
+            </section>
+        </div>
+    </div>
+
+    <button id="logout-button">Logout</button>
+
+
+    <script src="dashboard.js"></script>
+</body>
+</html>
