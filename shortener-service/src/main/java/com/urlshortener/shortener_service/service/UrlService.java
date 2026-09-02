@@ -27,7 +27,7 @@ public class UrlService {
     private final RedisTemplate<String, Object> redisTemplate;
     private final ClickEventProducer clickEventProducer;
 
-    private static final String BASE_URL = "http://localhost:8082/";
+    private static final String BASE_URL = "http://localhost:8080/";
     private static final long REDIS_TTL_HOURS = 24;
 
     @Transactional
