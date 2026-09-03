@@ -2,7 +2,7 @@
 
 A URL shortening platform built with Spring Boot microservices, designed to demonstrate real-world backend concepts: Redis caching, Kafka event-driven analytics, JWT authentication, and clean service separation.
 
-Users register, log in, and create short URLs. Every click is tracked asynchronously and enriched with geolocation and device data, giving URL owners real statistics without slowing down redirects. A dedicated API gateway sits in front of all three backend services, validating JWTs and routing requests so clients only ever need to talk to one address.
+Users register, log in, and create short URLs. Every click is tracked asynchronously and enriched with geolocation and device data, giving URL owners real statistics without slowing down redirects. A dedicated API gateway sits in front of all three backend services, validating JWTs and routing requests so clients only ever need to talk to one address. A lightweight vanilla HTML/CSS/JavaScript frontend calls the API directly, covering registration, login, URL management, and the analytics dashboard.
 
 ## 🛠️ Tech Stack
 
@@ -19,6 +19,7 @@ Users register, log in, and create short URLs. Every click is tracked asynchrono
 | UserAgentUtils | Browser/device detection for click analytics |
 | Docker + Docker Compose | Containerization |
 | Java 21 | Programming language |
+| HTML/CSS/JavaScript (vanilla) | Frontend — no framework or build step |
 
 ## 📦 Services
 
@@ -68,6 +69,7 @@ smart-url-shortener/
 ├── auth-service/         (includes Dockerfile)
 ├── shortener-service/    (includes Dockerfile)
 ├── analytics-service/    (includes Dockerfile)
+├── frontend/             (vanilla HTML/CSS/JS — login.html, dashboard.html)
 ├── postgres-init/        (DB creation script for Docker Compose)
 ├── docker-compose.yml    (full stack: infra + all 4 services)
 └── README.md
@@ -96,18 +98,20 @@ Runs the entire stack — Postgres, Redis, Kafka/Zookeeper, and all four service
 docker-compose up --build
 ```
 
-This builds each service's image from its `Dockerfile`, creates the three databases automatically (via `postgres-init/init-databases.sql`), and starts everything on a shared Docker network — services reach each other by container name (e.g. `api-gateway` calls `http://auth-service:8081` internally), while the same ports are still published to your machine:
+This builds each service's image, creates the three databases automatically (via `postgres-init/init-databases.sql`), and starts everything on a shared Docker network.
 
 | Service | URL |
 |---|---|
 | api-gateway | http://localhost:8080 |
 | auth-service | http://localhost:8081 |
-| shortener-service | http://localhost:8082 |
-| analytics-service | http://localhost:8083 |
+| shortener-service | not exposed to host — reachable only via the gateway |
+| analytics-service | not exposed to host — reachable only via the gateway |
 
-`JWT_SECRET` is set explicitly (and identically) for both `auth-service` and `api-gateway` in `docker-compose.yml`, so token validation works out of the box. `api-gateway` loads its routes from `application-docker.properties` (activated via `SPRING_PROFILES_ACTIVE=docker`) instead of the default `application.properties`, so its routes point at Docker service names (e.g. `http://auth-service:8081`) rather than `localhost`. To stop everything: `docker-compose down` (add `-v` to also wipe the Postgres volume).
+Secrets (`DB_PASSWORD`, `JWT_SECRET`) load from a git-ignored `.env` file at the project root. To stop everything: `docker-compose down` (add `-v` to also wipe the Postgres volume).
 
-> **Port 5432 conflict:** if you have Postgres installed natively on your machine (outside Docker) and its service is running, it will likely already be holding port 5432, causing tools like pgAdmin to connect to that instead of the containerized database (though your services themselves are unaffected, since they talk to Postgres over Docker's internal network, not this port). If you hit this, stop the native Postgres service (Windows: `services.msc` → find `postgresql-x64-...` → Stop, and set Startup type to Disabled to prevent it recurring).
+**Using the app:** open `frontend/login.html` in your browser once containers are up.
+
+> Port 5432 already in use? A native Postgres install is likely holding it — stop that service, or ignore it, since the containers talk to Postgres over Docker's internal network either way.
 
 ### Option B — Run locally (Java/Maven, no containers for the apps)
 
@@ -135,15 +139,13 @@ From each service's folder:
 ./mvnw spring-boot:run
 ```
 
-Start `auth-service`, `shortener-service`, and `analytics-service` first, then `api-gateway` — the gateway itself will start regardless of order, but requests through it won't succeed until the backend it's routing to is actually up.
+Start `auth-service`, `shortener-service`, and `analytics-service` first, then `api-gateway`. Unlike Docker Compose, this exposes every service directly on `localhost` (8080–8083), for easier debugging.
 
-Same URLs as the table above.
-
-> `api-gateway` and `auth-service` must share the same `jwt.secret` — both default to the same fallback value if the `JWT_SECRET` environment variable isn't set, but if you override one in a real environment, override the other identically or token validation will fail.
+> `api-gateway` and `auth-service` must use the same `jwt.secret` (both default to `changeme` if `JWT_SECRET` isn't set) or token validation will fail.
 
 ## 📡 API Reference
 
-All requests below go through `api-gateway` on port `8080`. The gateway validates the `Authorization` header and attaches `X-User-Id`/`X-User-Email` to protected requests automatically — callers no longer set those headers themselves. (Each service's own port is still reachable directly for local debugging, but `shortener-service` has no authentication of its own, so direct access should only be used for testing.)
+All requests below go through `api-gateway` on port `8080`. The gateway validates the `Authorization` header and attaches `X-User-Id`/`X-User-Email` to protected requests automatically — callers no longer set those headers themselves. In Docker Compose, `shortener-service` and `analytics-service` have no authentication of their own and are not reachable directly (see Getting Started above) — `api-gateway` is the only supported entry point. (Running via Option B/local Maven exposes every service's own port directly, for debugging only.)
 
 ### auth-service — public, no token required
 
@@ -243,16 +245,23 @@ A caller only sees stats for shortCodes they own. If a shortCode has no click da
 
 ## 🔧 Known Limitations & Planned Improvements
 
-Tracked intentionally, rather than fixed reactively — these reflect deliberate sequencing decisions during development, not oversights.
 
-| # | Item | Status |
-|---|---|---|
-| 1 | Add `timestamp` to `ErrorResponse` in `auth-service` (already present in the other services) | ⬜ Open |
-| 2 | Align Spring Boot patch version across all services | ⬜ Open |
-| 3 | Restrict Kafka `spring.json.trusted.packages` from `*` to explicit package names (production hardening) | ⬜ Open |
-| 4 | Replace raw entity response in `/history` with a proper response DTO | ⬜ Open |
-| 5 | Fix root `.gitignore` encoding — `.idea/` is meant to be excluded but currently isn't, due to the file being saved in the wrong text encoding | ⬜ Open |
-| 6 | `api-gateway`'s error response `timestamp` serializes as a number array instead of an ISO date string, inconsistent with the other services | ⬜ Open |
+| # | Item                                                                                                                                                                                                        | Status |
+|---|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|---|
+| 1 | Add ownership (`userId`) checks to `analytics-service`'s stats endpoints                                                                                                                                    | ✅ Fixed |
+| 2 | Embed `userId` as a claim in the JWT at login/register time                                                                                                                                                 | ✅ Fixed |
+| 3 | Remove synchronous `clickCount` updates from `shortener-service` — click counting is now handled entirely and asynchronously by `analytics-service` via Kafka, keeping Redis cache hits fully database-free | ✅ Fixed |
+| 4 | Add `timestamp` to `ErrorResponse` in `auth-service` (already present in the other services)                                                                                                                | ✅ Fixed |
+| 5 | Align Spring Boot patch version across all services                                                                                                                                                         | ✅ Fixed |
+| 6 | Restrict Kafka `spring.json.trusted.packages` from `*` to explicit package names (production hardening)                                                                                                     | ✅ Fixed |
+| 7 | Replace raw entity response in `/history` with a proper response DTO                                                                                                                                        | ✅ Fixed |
+| 8 | Fix root `.gitignore` encoding — `.idea/` is meant to be excluded but currently isn't, due to the file being saved in the wrong text encoding                                                               | ✅ Fixed |
+| 9 | `api-gateway`'s error response `timestamp` serializes as a number array instead of an ISO date string, inconsistent with the other services                                                                 | ✅ Fixed |
+| 10 | `shortener-service`/`analytics-service` ports were published directly to the host, letting anyone bypass `api-gateway`'s JWT check entirely                                                                 | ✅ Fixed |
+| 11 | DB password and JWT secret were hardcoded and committed to source control                                                                                                                                   | ✅ Fixed |
+| 12 | Generated short URLs pointed at `shortener-service`'s now-unreachable direct port instead of `api-gateway`                                                                                                  | ✅ Fixed |
+| 13 | No format/scheme validation on submitted URLs — `originalUrl` is only checked for non-blank + length                                                                                                        | ⬜ Open |
+| 14 | No way to reactivate a deactivated URL — `deactivate` endpoint exists, no `activate` endpoint                                                                                                               | ⬜ Open |
 
 ## 🗺️ Roadmap
 
@@ -261,7 +270,7 @@ Tracked intentionally, rather than fixed reactively — these reflect deliberate
 - [x] `analytics-service`
 - [x] `api-gateway`
 - [x] Full Docker Compose (all services + databases)
-- [ ] Frontend
+- [x] Frontend
 - [ ] Kubernetes deployment
 - [ ] CI/CD pipeline
 
